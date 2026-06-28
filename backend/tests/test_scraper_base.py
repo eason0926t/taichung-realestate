@@ -43,3 +43,31 @@ async def test_base_scraper_records_failure(db_session):
     assert status is not None
     assert status.failure_count >= 1
     assert status.status in ("failing", "broken")
+
+
+from unittest.mock import AsyncMock, patch, MagicMock
+
+@pytest.mark.asyncio
+async def test_591_parse_listing():
+    """測試 591 HTML 解析邏輯，不真正連網"""
+    from backend.scrapers.site_591 import Scraper591
+    html = """
+    <html><body>
+    <ul class="list-container">
+      <li class="item">
+        <div class="price-main">1,580</div>
+        <div class="item-title">北區民族路2房42坪</div>
+        <div class="item-area">42坪</div>
+        <div class="location">台中市北區</div>
+        <a class="link" href="/sale-detail-123.html">詳情</a>
+        <img src="https://img.591.com.tw/a.jpg"/>
+      </li>
+    </ul>
+    </body></html>
+    """
+    scraper = Scraper591.__new__(Scraper591)
+    results = scraper._parse_html(html)
+    assert len(results) == 1
+    assert results[0].source == "591"
+    assert results[0].price == 15800000
+    assert results[0].district == "北區"
