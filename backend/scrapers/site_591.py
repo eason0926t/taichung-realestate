@@ -1,99 +1,122 @@
 # backend/scrapers/site_591.py
 import re
-from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
-
+import json
+from playwright.async_api import async_playwright, Response
 from backend.scrapers.base import BaseScraper, ScrapeResult
 
-TAICHUNG_URL = (
-    "https://sale.591.com.tw/?type=1&regionid=8"  # regionid=8 = 台中市
-)
+TAICHUNG_URL = "https://sale.591.com.tw/?type=1&regionid=8"  # 台中市
+DISTRICTS = [
+    "中區", "東區", "南區", "西區", "北區", "西屯區", "南屯區", "北屯區",
+    "豐原區", "大里區", "太平區", "清水區", "沙鹿區", "梧棲區", "烏日區",
+    "神岡區", "大雅區", "潭子區", "大甲區", "后里區", "東勢區", "石岡區",
+    "新社區", "和平區", "龍井區", "大肚區", "霧峰區",
+]
+
+
+def _extract_district(text: str) -> str:
+    for d in DISTRICTS:
+        if d in text:
+            return d
+    return ""
 
 
 class Scraper591(BaseScraper):
     platform = "591"
 
     async def scrape(self) -> list[ScrapeResult]:
+        captured: list[dict] = []
+
+        async def handle_response(resp: Response):
+            url = resp.url
+            if "591.com.tw" in url and any(k in url for k in ["sale/list", "house/list", "v1/web"]):
+                ct = resp.headers.get("content-type", "")
+                if "json" in ct:
+                    try:
+                        body = await resp.json()
+                        if isinstance(body, dict):
+                            data = body.get("data", {})
+                            if isinstance(data, dict):
+                                for key in ["house_list", "items", "list", "data"]:
+                                    val = data.get(key)
+                                    if isinstance(val, list) and val:
+                                        captured.extend(val)
+                                        break
+                            elif isinstance(data, list):
+                                captured.extend(data)
+                    except Exception:
+                        pass
+
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page(
-                user_agent=(
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                )
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
             )
-            await page.goto(TAICHUNG_URL, wait_until="networkidle", timeout=30000)
-            # 捲動觸發懶加載
-            for _ in range(3):
-                await page.keyboard.press("End")
-                await page.wait_for_timeout(1000)
-            html = await page.content()
-            await browser.close()
-        return self._parse_html(html)
-
-    def _parse_html(self, html: str) -> list[ScrapeResult]:
-        soup = BeautifulSoup(html, "html.parser")
-        results = []
-        for item in soup.select("li.item, div.item-container"):
+            page.on("response", handle_response)
             try:
-                price_text = (item.select_one(".price-main") or item.select_one("[class*='price']"))
-                if not price_text:
-                    continue
-                price_num = re.sub(r"[^\d]", "", price_text.get_text())
-                if not price_num:
-                    continue
-                price_wan = int(price_num)  # 591 顯示「萬」為單位
+                await page.goto(TAICHUNG_URL, wait_until="networkidle", timeout=30000)
+                await page.wait_for_timeout(2000)
+                for _ in range(3):
+                    await page.keyboard.press("End")
+                    await page.wait_for_timeout(1000)
+            except Exception:
+                pass
+            finally:
+                await browser.close()
 
-                title_el = item.select_one(".item-title, [class*='title']")
-                title = title_el.get_text(strip=True) if title_el else ""
+        if captured:
+            return self._parse_items(captured)
+        return []
 
-                area_el = item.select_one(".item-area, [class*='area']")
-                area_text = area_el.get_text(strip=True) if area_el else ""
-                area_match = re.search(r"([\d.]+)\s*坪", area_text)
+    def _parse_items(self, items: list[dict]) -> list[ScrapeResult]:
+        results = []
+        seen: set[str] = set()
+        for item in items:
+            try:
+                raw_id = str(
+                    item.get("house_id") or item.get("id") or item.get("houseId") or ""
+                )
+                if not raw_id or raw_id in seen:
+                    continue
+                seen.add(raw_id)
+
+                price_wan = item.get("price") or item.get("totalPrice") or 0
+                title = item.get("house_title") or item.get("title") or item.get("name") or ""
+                location = (
+                    item.get("address") or item.get("location") or
+                    item.get("section_str") or ""
+                )
+                area_raw = item.get("area") or item.get("building_area") or item.get("ping") or ""
+                area_match = re.search(r"([\d.]+)", str(area_raw))
                 area_ping = float(area_match.group(1)) if area_match else None
 
-                loc_el = item.select_one(".location, [class*='location'], [class*='address']")
-                location = loc_el.get_text(strip=True) if loc_el else ""
-                district = self._extract_district(location)
+                url = f"https://sale.591.com.tw/home/house/detail/2/{raw_id}.html"
 
-                link_el = item.select_one("a[href*='sale-detail'], a.link")
-                if not link_el:
-                    continue
-                href = link_el.get("href", "")
-                source_id = re.search(r"(\d+)", href)
-                if not source_id:
-                    continue
-                source_id = source_id.group(1)
-                url = f"https://sale.591.com.tw{href}" if href.startswith("/") else href
+                photos = []
+                cover = item.get("img_url") or item.get("img") or item.get("photo")
+                if isinstance(cover, list):
+                    photos = [i for i in cover if isinstance(i, str)]
+                elif isinstance(cover, str) and cover:
+                    photos = [cover]
 
-                photo_el = item.select_one("img[src*='591']")
-                photos = [photo_el["src"]] if photo_el else []
-
-                unit_price = int(price_wan * 10000 / area_ping) // 10000 if area_ping else None
+                unit_price = None
+                if area_ping and price_wan:
+                    try:
+                        unit_price = int(float(price_wan) * 10000 / area_ping) // 10000
+                    except Exception:
+                        pass
 
                 results.append(ScrapeResult(
                     source="591",
-                    source_id=source_id,
+                    source_id=raw_id,
                     url=url,
                     title=title,
-                    price=price_wan * 10000,
+                    price=int(float(price_wan) * 10000) if price_wan else None,
                     unit_price=unit_price,
                     area_ping=area_ping,
-                    district=district,
+                    district=_extract_district(location),
                     address=location,
                     photos=photos,
                 ))
             except Exception:
                 continue
         return results
-
-    def _extract_district(self, text: str) -> str:
-        districts = ["中區", "東區", "南區", "西區", "北區", "西屯區", "南屯區", "北屯區",
-                     "豐原區", "大里區", "太平區", "清水區", "沙鹿區", "梧棲區", "烏日區",
-                     "神岡區", "大雅區", "潭子區", "大甲區", "后里區", "東勢區", "石岡區",
-                     "新社區", "和平區", "龍井區", "大肚區", "霧峰區"]
-        for d in districts:
-            if d in text:
-                return d
-        return ""

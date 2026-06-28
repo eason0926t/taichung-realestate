@@ -63,6 +63,15 @@ async def run_health_check():
                 logger.info(f"[{row.platform}] 修復結果: {success}")
 
 
+async def geocode_listings():
+    """Geocodes up to 10 listings missing lat/lng every 10 minutes."""
+    from backend.services.geocoder import geocode_missing
+    async with AsyncSessionLocal() as db:
+        count = await geocode_missing(db)
+        if count:
+            logger.info(f"geocode_listings: geocoded {count} listings")
+
+
 async def sync_price_records():
     """Syncs 實價登錄 data daily at 06:00."""
     from backend.services.price_api import TaichungPriceAPI
@@ -96,4 +105,5 @@ def create_scheduler() -> AsyncIOScheduler:
     scheduler.add_job(run_all_scrapers,  IntervalTrigger(hours=2),    id="scrapers")
     scheduler.add_job(run_health_check,  IntervalTrigger(minutes=30), id="health_check")
     scheduler.add_job(sync_price_records, CronTrigger(hour=6, minute=0), id="price_sync")
+    scheduler.add_job(geocode_listings,  IntervalTrigger(minutes=10), id="geocoding")
     return scheduler

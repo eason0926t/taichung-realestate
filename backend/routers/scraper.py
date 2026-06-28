@@ -38,6 +38,19 @@ async def trigger_scraper(
     return {"status": "triggered", "platform": platform}
 
 
+async def _run_geocode(limit: int = 50) -> None:
+    from backend.services.geocoder import geocode_missing
+    async with AsyncSessionLocal() as db:
+        await geocode_missing(db, limit=limit)
+
+
+@router.post("/scraper/geocode")
+async def trigger_geocode(background_tasks: BackgroundTasks, limit: int = Query(50, le=200)):
+    """Geocode up to `limit` listings that are missing coordinates."""
+    background_tasks.add_task(_run_geocode, limit)
+    return {"status": "triggered", "limit": limit}
+
+
 @router.get("/scraper/status")
 async def scraper_status():
     async with AsyncSessionLocal() as db:

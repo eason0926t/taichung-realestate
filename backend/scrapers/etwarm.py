@@ -1,58 +1,103 @@
 # backend/scrapers/etwarm.py
 import re
-import httpx
-from bs4 import BeautifulSoup
+import json
+import asyncio
+from playwright.async_api import async_playwright, Response
 from backend.scrapers.base import BaseScraper, ScrapeResult
-from backend.scrapers.site_591 import Scraper591
 
-ETWARM_URL = "https://www.etwarm.com.tw/Buy/List/?city=407"  # 台中市
+LIST_URL = "https://www.etwarm.com.tw/Buy/List/?city=407"  # 台中市
+DISTRICTS = [
+    "中區", "東區", "南區", "西區", "北區", "西屯區", "南屯區", "北屯區",
+    "豐原區", "大里區", "太平區", "清水區", "沙鹿區", "梧棲區", "烏日區",
+    "神岡區", "大雅區", "潭子區", "大甲區", "后里區", "東勢區", "石岡區",
+    "新社區", "和平區", "龍井區", "大肚區", "霧峰區",
+]
+
+
+def _extract_district(text: str) -> str:
+    for d in DISTRICTS:
+        if d in text:
+            return d
+    return ""
+
 
 class ScraperEtwarm(BaseScraper):
     platform = "etwarm"
 
     async def scrape(self) -> list[ScrapeResult]:
-        headers = {"User-Agent": "Mozilla/5.0 Chrome/124.0.0.0"}
-        async with httpx.AsyncClient(headers=headers, timeout=20) as client:
-            resp = await client.get(ETWARM_URL)
-            resp.raise_for_status()
-        return self._parse_html(resp.text)
+        captured: list[dict] = []
 
-    def _parse_html(self, html: str) -> list[ScrapeResult]:
-        soup = BeautifulSoup(html, "html.parser")
-        extractor = Scraper591.__new__(Scraper591)
+        async def handle_response(resp: Response):
+            if "buy-list-json" in resp.url or ("houses" in resp.url and "json" in resp.url):
+                try:
+                    body = await resp.json()
+                    items = body.get("data", [])
+                    if isinstance(items, list):
+                        captured.extend(items)
+                except Exception:
+                    pass
+
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page(
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            )
+            page.on("response", handle_response)
+            await page.goto(LIST_URL, wait_until="networkidle", timeout=30000)
+            await page.wait_for_timeout(2000)
+            # scroll to trigger more loads
+            for _ in range(3):
+                await page.keyboard.press("End")
+                await page.wait_for_timeout(1500)
+            await browser.close()
+
+        if captured:
+            return self._parse_items(captured)
+
+        # Fallback: parse HTML if no JSON was intercepted
+        return []
+
+    def _parse_items(self, items: list[dict]) -> list[ScrapeResult]:
         results = []
-        for item in soup.select("[class*='item'], [class*='property']"):
+        for item in items:
             try:
-                price_el = item.select_one("[class*='price']")
-                if not price_el:
+                raw_id = str(item.get("編號") or item.get("id") or "")
+                if not raw_id:
                     continue
-                price_num = re.sub(r"[^\d]", "", price_el.get_text())
-                if not price_num:
-                    continue
-                link_el = item.select_one("a[href]")
-                if not link_el:
-                    continue
-                href = link_el.get("href", "")
-                source_id = re.search(r"(\d{5,})", href)
-                if not source_id:
-                    continue
-                url = f"https://www.etwarm.com.tw{href}" if href.startswith("/") else href
-                loc_el = item.select_one("[class*='addr'], [class*='location']")
-                location = loc_el.get_text(strip=True) if loc_el else ""
-                area_el = item.select_one("[class*='area']")
-                area_text = area_el.get_text(strip=True) if area_el else ""
-                area_match = re.search(r"([\d.]+)\s*坪", area_text)
+                price_wan = item.get("刊登售價(萬)") or item.get("price") or 0
+                address_parts = [
+                    item.get("縣市", ""),
+                    item.get("鄉鎮市區", ""),
+                    item.get("地址", ""),
+                ]
+                address = "".join(p for p in address_parts if p)
+                area = item.get("建物坪數") or item.get("area")
+                area_match = re.search(r"([\d.]+)", str(area)) if area else None
                 area_ping = float(area_match.group(1)) if area_match else None
-                photo_el = item.select_one("img[src]")
-                photos = [photo_el["src"]] if photo_el else []
+
+                photos_raw = (item.get("多媒體") or {}).get("照片") or []
+                photos = [p for p in photos_raw if isinstance(p, str)]
+
+                detail_path = item.get("物件詳細頁", "")
+                url = (
+                    f"https://www.etwarm.com.tw{detail_path}"
+                    if detail_path.startswith("/")
+                    else detail_path or f"https://www.etwarm.com.tw/Buy/Detail/{raw_id}"
+                )
+
+                age_raw = item.get("屋齡", "")
+                age_match = re.search(r"(\d+)", str(age_raw)) if age_raw else None
+                building_age = int(age_match.group(1)) if age_match else None
+
                 results.append(ScrapeResult(
                     source="etwarm",
-                    source_id=source_id.group(1),
+                    source_id=raw_id,
                     url=url,
-                    price=int(price_num) * 10000,
+                    price=int(float(price_wan) * 10000) if price_wan else None,
                     area_ping=area_ping,
-                    district=extractor._extract_district(location),
-                    address=location,
+                    building_age=building_age,
+                    district=_extract_district(address),
+                    address=address,
                     photos=photos,
                 ))
             except Exception:
