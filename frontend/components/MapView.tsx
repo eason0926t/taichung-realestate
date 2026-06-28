@@ -1,8 +1,7 @@
 "use client";
 import { useEffect, useRef, useCallback } from "react";
-import mapboxgl from "mapbox-gl";
-
-mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? "";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 
 const TAICHUNG_CENTER: [number, number] = [120.6736, 24.1477];
 
@@ -13,10 +12,10 @@ interface MapViewProps {
 
 export default function MapView({ onBoundsChange, onMarkerClick }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
 
   const emitBounds = useCallback(
-    (map: mapboxgl.Map) => {
+    (map: maplibregl.Map) => {
       const b = map.getBounds();
       if (!b) return;
       onBoundsChange([
@@ -29,14 +28,14 @@ export default function MapView({ onBoundsChange, onMarkerClick }: MapViewProps)
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
-    const map = new mapboxgl.Map({
+    const map = new maplibregl.Map({
       container: containerRef.current,
-      style: "mapbox://styles/mapbox/dark-v11",
+      style: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
       center: TAICHUNG_CENTER,
       zoom: 12,
     });
 
-    map.addControl(new mapboxgl.NavigationControl(), "top-right");
+    map.addControl(new maplibregl.NavigationControl(), "top-right");
 
     map.on("load", () => {
       emitBounds(map);
@@ -74,7 +73,7 @@ export default function MapView({ onBoundsChange, onMarkerClick }: MapViewProps)
         layout: {
           "text-field": ["get", "point_count_abbreviated"],
           "text-size": 13,
-          "text-font": ["DIN Offc Pro Medium", "Arial Unicode MS Bold"],
+          "text-font": ["Noto Sans Bold", "Arial Unicode MS Bold"],
         },
         paint: { "text-color": "#fbbf24" },
       });
@@ -101,7 +100,7 @@ export default function MapView({ onBoundsChange, onMarkerClick }: MapViewProps)
             ]
           ],
           "text-size": 11,
-          "text-font": ["DIN Offc Pro Bold", "Arial Unicode MS Bold"],
+          "text-font": ["Noto Sans Bold", "Arial Unicode MS Bold"],
           "text-padding": 4,
         },
         paint: {
@@ -123,7 +122,7 @@ export default function MapView({ onBoundsChange, onMarkerClick }: MapViewProps)
         const feature = e.features?.[0];
         if (!feature) return;
         const clusterId = feature.properties?.cluster_id;
-        (map.getSource("listings") as mapboxgl.GeoJSONSource)
+        (map.getSource("listings") as maplibregl.GeoJSONSource)
           .getClusterExpansionZoom(clusterId, (err, zoom) => {
             if (err || !zoom) return;
             map.easeTo({
@@ -142,7 +141,7 @@ export default function MapView({ onBoundsChange, onMarkerClick }: MapViewProps)
 
   // Expose method to update listings source from outside
   (MapView as any).updateListings = (geojson: GeoJSON.FeatureCollection) => {
-    const src = mapRef.current?.getSource("listings") as mapboxgl.GeoJSONSource;
+    const src = mapRef.current?.getSource("listings") as maplibregl.GeoJSONSource;
     src?.setData(geojson);
   };
 

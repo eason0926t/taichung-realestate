@@ -1,7 +1,6 @@
 // frontend/app/layout.tsx
 import type { Metadata } from "next";
 import "@/styles/globals.css";
-import "mapbox-gl/dist/mapbox-gl.css";
 
 export const metadata: Metadata = {
   title: "台中房市通",
