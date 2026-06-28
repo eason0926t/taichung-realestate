@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 from backend.services.price_api import TaichungPriceAPI
 
 @pytest.mark.asyncio
@@ -15,16 +15,20 @@ async def test_fetch_returns_price_records():
                     "總價元": "8500000",
                     "單價元平方公尺": "25000",
                     "建物移轉總面積平方公尺": "138.56",
-                    "交易年月日": "1130315",
+                    "交易年月日": "1150620",  # 2026-06-20, within 3 months
                     "建物型態": "公寓(5樓含以下非電梯)",
                 }
             ]
         }
     }
     with patch("backend.services.price_api.httpx.AsyncClient") as mock_client:
-        mock_client.return_value.__aenter__.return_value.get = AsyncMock(
-            return_value=AsyncMock(json=AsyncMock(return_value=mock_data), status_code=200)
-        )
+        mock_response = MagicMock()
+        mock_response.json.return_value = mock_data
+        mock_instance = AsyncMock()
+        mock_instance.get = AsyncMock(return_value=mock_response)
+        mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_instance)
+        mock_client.return_value.__aexit__ = AsyncMock(return_value=None)
+
         api = TaichungPriceAPI()
         records = await api.fetch_recent(months=3)
 

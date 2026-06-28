@@ -3,7 +3,6 @@
 https://plvr.land.moj.gov.tw/DownloadOpenData
 CKAN API: https://data.gov.tw/dataset/81296
 """
-import inspect
 import httpx
 from datetime import date, timedelta
 
@@ -26,14 +25,6 @@ def _roc_to_date(roc_str: str) -> date | None:
         return None
 
 
-async def _json(resp) -> dict:
-    """Handle both sync (real httpx) and async (mocked) .json() calls."""
-    result = resp.json()
-    if inspect.isawaitable(result):
-        return await result
-    return result
-
-
 class TaichungPriceAPI:
     def __init__(self):
         self.session = httpx.AsyncClient(timeout=30)
@@ -42,6 +33,7 @@ class TaichungPriceAPI:
         records = []
         offset = 0
         limit = 1000
+        cutoff = date.today() - timedelta(days=months * 30)
 
         async with httpx.AsyncClient(timeout=30) as client:
             while True:
@@ -53,13 +45,16 @@ class TaichungPriceAPI:
                         "offset": offset,
                     }
                 )
-                data = await _json(resp)
+                data = resp.json()
                 rows = data.get("result", {}).get("records", [])
                 if not rows:
                     break
 
                 for row in rows:
                     txn_date = _roc_to_date(row.get("交易年月日", ""))
+                    if txn_date and txn_date < cutoff:
+                        continue
+
                     try:
                         area_sqm = float(row.get("建物移轉總面積平方公尺", 0))
                         area_ping = round(area_sqm * SQM_TO_PING, 2)
