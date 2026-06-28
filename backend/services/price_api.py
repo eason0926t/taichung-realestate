@@ -25,10 +25,10 @@ def _roc_to_date(roc_str: str) -> date | None:
         return None
 
 
-class TaichungPriceAPI:
-    def __init__(self):
-        self.session = httpx.AsyncClient(timeout=30)
+MAX_PAGES = 50
 
+
+class TaichungPriceAPI:
     async def fetch_recent(self, months: int = 3) -> list[dict]:
         records = []
         offset = 0
@@ -36,7 +36,7 @@ class TaichungPriceAPI:
         cutoff = date.today() - timedelta(days=months * 30)
 
         async with httpx.AsyncClient(timeout=30) as client:
-            while True:
+            for _ in range(MAX_PAGES):
                 resp = await client.get(
                     CKAN_API,
                     params={
@@ -50,8 +50,11 @@ class TaichungPriceAPI:
                 if not rows:
                     break
 
+                all_older_than_cutoff = True
                 for row in rows:
                     txn_date = _roc_to_date(row.get("交易年月日", ""))
+                    if txn_date and txn_date >= cutoff:
+                        all_older_than_cutoff = False
                     if txn_date and txn_date < cutoff:
                         continue
 
@@ -74,7 +77,8 @@ class TaichungPriceAPI:
                     except (ValueError, TypeError):
                         continue
 
-                if len(rows) < limit:
+                # Stop if last page or all rows in this page are beyond the cutoff
+                if len(rows) < limit or all_older_than_cutoff:
                     break
                 offset += limit
 

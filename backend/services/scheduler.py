@@ -67,26 +67,26 @@ async def sync_price_records():
     """Syncs 實價登錄 data daily at 06:00."""
     from backend.services.price_api import TaichungPriceAPI
     from backend.models import PriceRecord
-    from sqlalchemy.dialects.postgresql import insert
-    from datetime import datetime, timezone
+    from sqlalchemy import delete
+    from datetime import date, timedelta
 
     logger.info("實價登錄同步啟動")
+    api = TaichungPriceAPI()
+    records = await api.fetch_recent(months=3)
+    if not records:
+        logger.info("實價登錄同步：無資料")
+        return
+
+    cutoff = date.today() - timedelta(days=90)
     async with AsyncSessionLocal() as db:
-        api = TaichungPriceAPI()
-        records = await api.fetch_recent(months=3)
+        # Delete the window we're about to re-populate to avoid duplicates
+        await db.execute(
+            delete(PriceRecord).where(PriceRecord.transaction_date >= cutoff)
+        )
         for r in records:
             if not r.get("transaction_date"):
                 continue
-            stmt = insert(PriceRecord).values(
-                district=r["district"],
-                address=r["address"],
-                price=r["price"],
-                unit_price=r["unit_price"],
-                area_ping=r["area_ping"],
-                building_type=r["building_type"],
-                transaction_date=r["transaction_date"],
-            ).on_conflict_do_nothing()
-            await db.execute(stmt)
+            db.add(PriceRecord(**r))
         await db.commit()
     logger.info(f"實價登錄同步完成，{len(records)} 筆")
 

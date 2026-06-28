@@ -13,7 +13,7 @@ def _listing_to_feature(row: Listing) -> dict:
         "geometry": {
             "type": "Point",
             "coordinates": [float(row.lng), float(row.lat)]
-        } if row.lat and row.lng else None,
+        } if row.lat is not None and row.lng is not None else None,
         "properties": {
             "id": row.id,
             "source": row.source,
