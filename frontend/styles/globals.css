@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary:    #1c1917;
+  --bg-secondary:  #292524;
+  --bg-glass:      rgba(28, 25, 23, 0.92);
+  --gold:          #f59e0b;
+  --gold-dark:     #d97706;
+  --gold-glow:     rgba(245, 158, 11, 0.3);
+  --green:         #10b981;
+  --text-primary:  #e7e5e4;
+  --text-secondary:#a8a29e;
+  --border-gold:   rgba(245, 158, 11, 0.3);
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.glass {
+  background: var(--bg-glass);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-gold);
+}
+
+.gold-btn {
+  background: linear-gradient(135deg, var(--gold), var(--gold-dark));
+  color: white;
+  font-weight: 700;
+  border-radius: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.gold-btn:hover { opacity: 0.9; }
