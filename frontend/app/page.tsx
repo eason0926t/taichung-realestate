@@ -1,32 +1,51 @@
 "use client";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import dynamic from "next/dynamic";
+import SearchBar from "@/components/SearchBar";
+import BottomCardRail from "@/components/BottomCardRail";
+import { fetchListings } from "@/lib/api";
+import type { ListingFeature } from "@/lib/types";
 
 const MapView = dynamic(() => import("@/components/MapView"), { ssr: false });
 
 export default function HomePage() {
-  const [bbox, setBbox] = useState<[number, number, number, number] | null>(null);
+  const [listings, setListings] = useState<ListingFeature[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
 
-  const handleBoundsChange = useCallback((b: [number, number, number, number]) => {
-    setBbox(b);
+  const loadListings = useCallback(async (b: [number, number, number, number]) => {
+    try {
+      const data = await fetchListings(b);
+      setListings(data.features);
+      const MapViewModule = await import("@/components/MapView");
+      (MapViewModule.default as any).updateListings?.(data);
+    } catch (e) {
+      console.error("listings fetch error", e);
+    }
   }, []);
 
+  const handleBoundsChange = useCallback((b: [number, number, number, number]) => {
+    loadListings(b);
+  }, [loadListings]);
+
   const handleMarkerClick = useCallback((id: number) => {
-    console.log("clicked listing", id);
+    setSelectedId(id);
   }, []);
 
   return (
     <main>
-      <MapView onBoundsChange={handleBoundsChange} onMarkerClick={handleMarkerClick} />
-      {bbox && (
-        <div style={{
-          position: "fixed", top: 8, left: 8,
-          background: "rgba(28,25,23,0.8)", color: "#a8a29e",
-          padding: "4px 8px", borderRadius: 4, fontSize: 11, zIndex: 10
-        }}>
-          bbox: {bbox.map(n => n.toFixed(3)).join(", ")}
-        </div>
-      )}
+      <MapView
+        onBoundsChange={handleBoundsChange}
+        onMarkerClick={handleMarkerClick}
+      />
+      <SearchBar
+        onSearch={() => {}}
+        onFilterOpen={() => {}}
+      />
+      <BottomCardRail
+        listings={listings}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+      />
     </main>
   );
 }
