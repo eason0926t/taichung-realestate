@@ -38,7 +38,7 @@ CREATE TABLE price_records (
   unit_price       INTEGER,
   area_ping        NUMERIC(8,2),
   building_type    VARCHAR(20),
-  transaction_date DATE,
+  transaction_date DATE NOT NULL,
   lat              NUMERIC(10,7),
   lng              NUMERIC(10,7),
   imported_at      TIMESTAMPTZ DEFAULT NOW()
@@ -48,6 +48,8 @@ CREATE INDEX price_records_geo ON price_records
   USING GIST (ST_SetSRID(ST_MakePoint(lng::float8, lat::float8), 4326))
   WHERE lat IS NOT NULL AND lng IS NOT NULL;
 CREATE INDEX price_records_date ON price_records (transaction_date DESC);
+CREATE INDEX listings_district_active ON listings (district, is_active);
+CREATE INDEX price_records_district_date ON price_records (district, transaction_date DESC);
 
 CREATE TABLE scraper_status (
   id              SERIAL PRIMARY KEY,
